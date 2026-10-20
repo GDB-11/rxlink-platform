@@ -13,7 +13,11 @@ export class ApiError extends Error {
 		public readonly status: number,
 		message: string,
 		/** Seconds until the account unlocks (429 from login / MFA verify). */
-		public readonly retryAfterSeconds?: number
+		public readonly retryAfterSeconds?: number,
+		/** Per-field messages from a 400 validation response, keyed by camelCase field name. */
+		public readonly fieldErrors?: Record<string, string>,
+		/** Parsed JSON error body, for responses whose shape is not `{message}` (e.g. a 422 import report). */
+		public readonly body?: unknown
 	) {
 		super(message);
 		this.name = 'ApiError';
@@ -42,11 +46,16 @@ function drainQueue(token: string | null) {
 	refreshQueue = [];
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(
+	path: string,
+	init: RequestInit = {},
+	parse: (res: Response) => Promise<T> = (res) => res.json() as Promise<T>
+): Promise<T> {
 	const url = `${PUBLIC_CATALOG_API_BASE_URL}${path}`;
 
+	// A FormData body needs the browser to set the multipart Content-Type (with its boundary).
 	const headers: Record<string, string> = {
-		'Content-Type': 'application/json',
+		...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
 		...(init.headers as Record<string, string>)
 	};
 
@@ -90,12 +99,16 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 	if (!response.ok) {
 		const body = (await response.json().catch(() => ({}))) as {
 			message?: string;
+			title?: string;
 			retryAfterSeconds?: number;
+			errors?: Record<string, string>;
 		};
 		throw new ApiError(
 			response.status,
-			body.message ?? response.statusText,
-			body.retryAfterSeconds
+			body.message ?? body.title ?? response.statusText,
+			body.retryAfterSeconds,
+			body.errors,
+			body
 		);
 	}
 
@@ -103,7 +116,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 		return undefined as T;
 	}
 
-	return response.json() as Promise<T>;
+	return parse(response);
 }
 
 export const api = {
@@ -113,6 +126,19 @@ export const api = {
 
 	post<T>(path: string, body: unknown, headers?: HeadersInit): Promise<T> {
 		return request<T>(path, { method: 'POST', body: JSON.stringify(body), headers });
+	},
+
+	postForm<T>(path: string, body: FormData): Promise<T> {
+		return request<T>(path, { method: 'POST', body });
+	},
+
+	putForm<T>(path: string, body: FormData): Promise<T> {
+		return request<T>(path, { method: 'PUT', body });
+	},
+
+	/** Authenticated binary download (e.g. a logo, which an `<img src>` could not fetch without the token). */
+	getBlob(path: string): Promise<Blob> {
+		return request<Blob>(path, { method: 'GET' }, (res) => res.blob());
 	},
 
 	put<T>(path: string, body: unknown, headers?: HeadersInit): Promise<T> {

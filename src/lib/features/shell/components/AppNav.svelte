@@ -4,13 +4,14 @@
 	import { resolve } from '$app/paths';
 
 	interface NavItem {
-		href: '/inicio' | '/seguridad';
+		href: '/inicio' | '/catalogos' | '/partners' | '/seguridad';
 		label: string;
 	}
 
-	// Grows with Phase 8.8–8.10 (catalogs, CSV import, partners).
 	const items: NavItem[] = [
 		{ href: '/inicio', label: 'Inicio' },
+		{ href: '/catalogos', label: 'Catálogos' },
+		{ href: '/partners', label: 'Partners' },
 		{ href: '/seguridad', label: 'Seguridad' }
 	];
 </script>
